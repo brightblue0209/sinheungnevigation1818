@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <title>학교 내비게이션</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        * { box-sizing: border-box; }
+        body { 
+            font-family: 'Apple SD Gothic Neo', sans-serif; 
+            text-align: center; 
+            background-color: #f4f4f9; 
+            margin: 0; 
+            padding: 15px; 
+        }
+        
+        h2 { margin-top: 5px; font-size: 22px; color: #333; }
+
+        .menu { 
+            width: 100%; 
+            max-width: 500px; 
+            margin: 0 auto 15px auto; 
+            padding: 15px; 
+            background: #fff; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            text-align: left; 
+        }
+        
+        .menu-row {
+            display: flex; 
+            align-items: center; 
+            justify-content: space-between; 
+            margin-bottom: 12px;
+        }
+
+        .menu-row label { font-weight: bold; font-size: 15px; color: #555; }
+
+        input, select { 
+            font-size: 16px; 
+            padding: 10px; 
+            border-radius: 8px; 
+            border: 1px solid #ccc;
+            width: 60%;
+            background-color: #fafafa;
+        }
+
+        #alarm-time { text-align: center; font-weight: bold; }
+
+        button { 
+            width: 100%; 
+            padding: 14px; 
+            margin: 5px 0; 
+            font-size: 16px; 
+            border-radius: 10px; 
+            border: none; 
+            font-weight: bold; 
+            cursor: pointer; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .btn-loc { background-color: #ff9800; color: white; }
+        .btn-start { background-color: #4CAF50; color: white; }
+        .btn-stop { background-color: #f44336; color: white; }
+
+        #map-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px; 
+            aspect-ratio: 1 / 1; 
+            margin: 0 auto;
+            border: 2px solid #333;
+            border-radius: 12px;
+            overflow: hidden;
+            background-color: #e5e3df;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        #layer-bg {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-image: url('https://i.postimg.cc/kMQ5NTmy/sagaghyeong-beom-wi-keulob.png');
+            background-size: 100% 100%;
+            background-position: center;
+            background-repeat: no-repeat;
+            z-index: 1;
+        }
+        
+        #layer-svg, #layer-labels {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none; 
+        }
+        
+        #layer-svg { z-index: 10; }
+        #layer-labels { z-index: 20; }
+        
+        #my-marker {
+            position: absolute;
+            width: 18px; height: 18px;
+            background-color: #ff2a2a;
+            border-radius: 50%;
+            transform: translate(-50%, -50%); 
+            display: none; 
+            z-index: 30; 
+            box-shadow: 0 0 8px rgba(0,0,0,0.6);
+            border: 3px solid white;
+            transition: left 0.5s linear, top 0.5s linear; 
+        }
+
+        .building-label {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.95);
+            border: 1px solid #333;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: bold;
+            color: #000;
+            transform: translate(-50%, -100%); 
+            white-space: nowrap;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        #message { margin: 15px 0 10px 0; font-size: 16px; }
+    </style>
+</head>
+<body>
+
+    <h2>🏫 우리 학교 내비게이션</h2>
+    
+    <div class="menu">
+        <div class="menu-row">
+            <label>목적지</label>
+            <select id="dest" onclick="unlockTTS()">
+                <option value="smith">스미스홀</option>
+                <option value="seonam">서남동홀</option>
+                <option value="library">도서관</option>
+                <option value="art">예능관</option>
+            </select>
+        </div>
+        <div class="menu-row">
+            <label>출발 시간</label>
+            <input type="text" id="alarm-time" placeholder="예: 14:30" maxlength="5" onclick="unlockTTS()">
+        </div>
+        <div style="margin-top: 15px;">
+            <button class="btn-loc" onclick="toggleLocation()">📍 위치 표시 켜기/끄기</button>
+            <button class="btn-start" onclick="startNavi()">🚀 내비게이션 시작</button>
+            <button class="btn-stop" onclick="stopNavi()">🛑 안내 중단</button>
+        </div>
+    </div>
+
+    <h3 id="message">대기 중...</h3>
+    
+    <div id="map-container">
+        <div id="layer-bg"></div>
+        <svg id="layer-svg"></svg>
+        <div id="layer-labels"></div>
+        <div id="my-marker"></div>
+    </div>
+
+    <script>
+        const mapMinLon = 127.135602; 
+        const mapMaxLon = 127.138451; 
+        const mapMinLat = 35.815770;  
+        const mapMaxLat = 35.818096;  
+
+        const places = {
+            smith: { lat: 35.81605, lon: 127.13630, name: "스미스홀" },
+            art: { lat: 35.81760, lon: 127.13730, name: "예능관" },
+            library: { lat: 35.81707, lon: 127.13786, name: "도서관" },
+            seonam: { lat: 35.81664, lon: 127.13812, name: "서남동홀" }
+        };
+
+        let isTracking = false;   
+        let isNaviActive = false; 
+        let isArrived = false;
+        let locationInterval = null; 
+        let targetId = "";
+        let alarmTriggered = false;
+        let isTtsUnlocked = false; 
+
+        window.speechSynthesis.getVoices();
+
+        // 폰 터치 시 강력하게 TTS 잠금 해제
+        function unlockTTS() {
+            if (!isTtsUnlocked) {
+                // 완전히 빈 문자열 대신 공백 한 칸을 소리 없는 볼륨으로 재생
+                let silentMsg = new SpeechSynthesisUtterance(" ");
+                silentMsg.volume = 0; 
+                window.speechSynthesis.speak(silentMsg);
+                isTtsUnlocked = true;
+            }
+        }
+
+        // 화면 탭할 때마다 잠금 해제 시도
+        document.body.addEventListener('touchstart', unlockTTS, { once: true });
+        document.body.addEventListener('click', unlockTTS, { once: true });
+
+        function drawLabels() {
+            const labelsLayer = document.getElementById("layer-labels");
+            labelsLayer.innerHTML = ""; 
+            
+            const rect = document.getElementById("map-container").getBoundingClientRect();
+            const containerWidth = rect.width;
+            const containerHeight = rect.height;
+
+            for (let key in places) {
+                let place = places[key];
+                let pixelX = ((place.lon - mapMinLon) / (mapMaxLon - mapMinLon)) * containerWidth; 
+                let pixelY = (1 - (place.lat - mapMinLat) / (mapMaxLat - mapMinLat)) * containerHeight;
+
+                let label = document.createElement("div");
+                label.className = "building-label";
+                label.innerHTML = place.name;
+                label.style.left = pixelX + "px";
+                label.style.top = pixelY + "px";
+                labelsLayer.appendChild(label);
+            }
+        }
+
+        window.onload = function() {
+            drawLabels();
+            window.addEventListener('resize', drawLabels);
+
+            setInterval(function() {
+                let departTime = document.getElementById("alarm-time").value.trim();
+                
+                if (departTime.length >= 4) { 
+                    let now = new Date();
+                    let hours = String(now.getHours()).padStart(2, '0');
+                    let mins = String(now.getMinutes()).padStart(2, '0');
+                    
+                    if (hours + ":" + mins === departTime) {
+                        if (!alarmTriggered) {
+                            let voiceMsg = new SpeechSynthesisUtterance("설정하신 시간이 되었습니다. 지금 출발해주세요.");
+                            voiceMsg.pitch = 1.6; 
+                            voiceMsg.rate = 1.1;  
+                            voiceMsg.volume = 1;
+
+                            let voices = window.speechSynthesis.getVoices();
+                            for(let i=0; i<voices.length; i++) {
+                                if(voices[i].lang.includes('ko') && (voices[i].name.includes('Female') || voices[i].name.includes('여성'))) {
+                                    voiceMsg.voice = voices[i];
+                                    break;
+                                }
+                            }
+                            
+                            // 잠들어있는 TTS 엔진 깨우기 (iOS 대응)
+                            window.speechSynthesis.resume();
+                            window.speechSynthesis.speak(voiceMsg);
+                            
+                            setTimeout(() => {
+                                alert("⏰ 설정하신 출발 시간이 되었습니다! 이동해주세요.");
+                            }, 100);
+
+                            alarmTriggered = true; 
+                        }
+                    } else {
+                        alarmTriggered = false; 
+                    }
+                }
+            }, 1000);
+        };
+
+        function startForcedTracking() {
+            if (!navigator.geolocation) { alert("GPS를 지원하지 않습니다."); return; }
+            if (locationInterval !== null) return; 
+
+            navigator.geolocation.getCurrentPosition(updatePosition, showError, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+            
+            locationInterval = setInterval(() => {
+                navigator.geolocation.getCurrentPosition(updatePosition, showError, { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+            }, 1000);
+        }
+
+        function stopForcedTracking() {
+            if (locationInterval !== null) {
+                clearInterval(locationInterval);
+                locationInterval = null;
+            }
+        }
+
+        function toggleLocation() {
+            unlockTTS(); 
+            
+            if (isTracking) {
+                isTracking = false;
+                stopForcedTracking();
+                document.getElementById("my-marker").style.display = "none";
+                document.getElementById("message").innerHTML = "위치 표시를 껐습니다.";
+            } else {
+                isTracking = true;
+                document.getElementById("message").innerHTML = "실시간 위치를 갱신 중입니다...";
+                document.getElementById("message").style.color = "black";
+                startForcedTracking();
+            }
+        }
+
+        function startNavi() {
+            unlockTTS(); 
+            
+            targetId = document.getElementById("dest").value;
+            isNaviActive = true; 
+            isArrived = false;
+            
+            if (!isTracking) {
+                isTracking = true;
+                startForcedTracking();
+            }
+
+            document.getElementById("message").innerHTML = places[targetId].name + "(으)로 안내를 시작합니다.";
+            document.getElementById("message").style.color = "black";
+        }
+
+        function stopNavi() {
+            isNaviActive = false;
+            isArrived = false;
+            
+            document.getElementById("message").innerHTML = "내비게이션 안내를 중단했습니다.";
+            document.getElementById("message").style.color = "red";
+            document.getElementById("layer-svg").innerHTML = ""; 
+        }
+
+        function getPixel(lat, lon) {
+            const rect = document.getElementById("map-container").getBoundingClientRect();
+            let x = ((lon - mapMinLon) / (mapMaxLon - mapMinLon)) * rect.width;
+            let y = (1 - (lat - mapMinLat) / (mapMaxLat - mapMinLat)) * rect.height;
+            return { x, y };
+        }
+
+        function updatePosition(position) {
+            if (!isTracking) return; 
+
+            let myLat = position.coords.latitude;
+            let myLon = position.coords.longitude;
+            let myPos = getPixel(myLat, myLon);
+
+            let marker = document.getElementById("my-marker");
+            marker.style.left = myPos.x + "px";
+            marker.style.top = myPos.y + "px";
+            marker.style.display = "block";
+
+            let svg = document.getElementById("layer-svg");
+            while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+            if (isNaviActive && !isArrived) {
+                let dest = places[targetId];
+                let destPos = getPixel(dest.lat, dest.lon);
+
+                let line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", myPos.x);
+                line.setAttribute("y1", myPos.y);
+                line.setAttribute("x2", destPos.x);
+                line.setAttribute("y2", destPos.y);
+                line.setAttribute("stroke", "yellow");
+                line.setAttribute("stroke-width", "5");
+                line.setAttribute("stroke-dasharray", "8,8");
+                line.setAttribute("stroke-linecap", "round");
+                svg.appendChild(line);
+
+                if (Math.abs(myLat - dest.lat) < 0.00015 && Math.abs(myLon - dest.lon) < 0.00015) {
+                    isArrived = true;
+                    isNaviActive = false;
+                    while (svg.firstChild) svg.removeChild(svg.firstChild); 
+                    
+                    document.getElementById("message").innerHTML = "🎉 " + dest.name + " 도착! 안내를 종료합니다.";
+                    document.getElementById("message").style.color = "blue";
+                    
+                    alert(dest.name + "에 도착했습니다.");
+                }
+            }
+
+            const rect = document.getElementById("map-container").getBoundingClientRect();
+            if(myPos.x < 0 || myPos.x > rect.width || myPos.y < 0 || myPos.y > rect.height) {
+                document.getElementById("message").innerHTML = "⚠️ 위치가 학교 범위를 벗어나 지도에 점이 보이지 않습니다.";
+                document.getElementById("message").style.color = "red";
+            }
+        }
+
+        function showError(error) {
+            if(isTracking) {
+                document.getElementById("message").innerHTML = "❌ GPS 수신 실패. 폰의 GPS를 확인하세요.";
+            }
+        }
+    </script>
+</body>
+</html>
